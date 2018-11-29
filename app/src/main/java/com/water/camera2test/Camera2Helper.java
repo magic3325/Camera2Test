@@ -2,6 +2,7 @@ package com.water.camera2test;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
@@ -75,7 +76,7 @@ public class Camera2Helper {
     private AfterDoListener mListener;
     private boolean isNeedHIdeProgressbar = true;
 
-
+    private MediaSaver mMediaSaver;
 
     static{
         ORIENTATIONS.append(Surface.ROTATION_0,90);
@@ -89,7 +90,8 @@ public class Camera2Helper {
 
         @Override
         public void onImageAvailable(ImageReader reader) {
-                    mBackgroundHandler.post(new Camera2Helper.ImageSaver(reader.acquireNextImage(),mFile));
+            saveImage(reader.acquireNextImage());
+                    //mBackgroundHandler.post(new Camera2Helper.ImageSaver(reader.acquireNextImage(),mFile));
         }
     };
 
@@ -229,6 +231,7 @@ public class Camera2Helper {
         mTextureView = view;
         mFile = file;
         mCameraManager = (CameraManager) mActivity.getSystemService(Context.CAMERA_SERVICE);
+        mMediaSaver = new MediaSaver(mActivity);
     }
 
     public static Camera2Helper getSingleton(Activity act,AutoFitTextureView view,File file){
@@ -303,7 +306,6 @@ public class Camera2Helper {
                     super.onCaptureCompleted(session, request, result);
                     unlockFocus();
                     mListener.onAfterTackPicture();
-                    showToast("Saved: " + mFile);
                 }
             };
             mCameraCaptureSession.stopRepeating();
@@ -599,6 +601,15 @@ public class Camera2Helper {
 
     }
 
+
+    public void saveImage(Image image){
+        ByteBuffer buffer = image.getPlanes()[0].getBuffer();
+        byte[] data = new byte[buffer.remaining()];
+        buffer.get(data);
+        ContentValues contentValues =mMediaSaver.createContentValues(data, 0, 0);
+        mMediaSaver.addSaveRequest(data,contentValues,null,null);
+
+    }
      static class ImageSaver implements Runnable{
 
 
