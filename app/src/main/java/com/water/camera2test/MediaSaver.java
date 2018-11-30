@@ -86,7 +86,7 @@ public class MediaSaver {
          * notified others when save completed.
          * @param uri The uri of saved file.
          */
-        void onFileSaved(Uri uri);
+        void onFileSaved(String path);
     }
 
     /**
@@ -419,9 +419,9 @@ public class MediaSaver {
                 }
                 mRequest.saveRequest();
                 if (mRequest.mMediaSaverListener != null) {
-                    mRequest.mMediaSaverListener.onFileSaved(mRequest.mUri);
+                    mRequest.mMediaSaverListener.onFileSaved(mRequest.mFilePath);
                     for (MediaSaverListener listener : mMediaSaverListeners) {
-                        listener.onFileSaved(mRequest.mUri);
+                        listener.onFileSaved(mRequest.mFilePath);
                     }
                 }
             }

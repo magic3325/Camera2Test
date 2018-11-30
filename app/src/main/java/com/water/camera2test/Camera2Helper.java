@@ -32,11 +32,7 @@ import android.util.Size;
 import android.util.SparseIntArray;
 import android.view.Surface;
 import android.view.TextureView;
-import android.widget.Toast;
-
 import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -57,6 +53,10 @@ public class Camera2Helper {
     private  static final int MAX_PREVIEW_WIDTH = 1920;
     private  static final int MAX_PREVIEW_HEIGHT = 1080;
 
+
+    private static final int DEFAULT_CAMERA_ID = 1;
+    private int mTextureViewWidth;
+    private int mTextureViewHeight;
     private AutoFitTextureView mTextureView;
     private String mCameraId;
     private CameraCaptureSession mCameraCaptureSession;
@@ -73,7 +73,6 @@ public class Camera2Helper {
     private CaptureRequest mPreviewRequest;
     private int mState = STATE_PREVIEW;
     private static CameraManager mCameraManager;
-    private AfterDoListener mListener;
     private boolean isNeedHIdeProgressbar = true;
 
     private MediaSaver mMediaSaver;
@@ -90,20 +89,24 @@ public class Camera2Helper {
 
         @Override
         public void onImageAvailable(ImageReader reader) {
-            saveImage(reader.acquireNextImage());
-                    //mBackgroundHandler.post(new Camera2Helper.ImageSaver(reader.acquireNextImage(),mFile));
+            Image image = reader.acquireNextImage();
+            saveImage(getBuffer(image));
         }
     };
 
     private final TextureView.SurfaceTextureListener mSurfaceTextureListener =new TextureView.SurfaceTextureListener() {
         @Override
         public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-            openCamera(width,height);
+            mTextureViewWidth = width;
+            mTextureViewHeight = height;
+            openCamera(DEFAULT_CAMERA_ID);
         }
 
         @Override
         public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
-            configureTransform(width,height);
+            //configureTransform(width,height);
+            mTextureViewWidth = width;
+            mTextureViewHeight = height;
         }
 
         @Override
@@ -147,14 +150,14 @@ public class Camera2Helper {
             switch (mState){
                 case STATE_PREVIEW:{
                     if(isNeedHIdeProgressbar){
-                        mListener.onAfterPreviewBack();
+
                         isNeedHIdeProgressbar=false;
                     }
                     break;
                 }
                 case STATE_WAITING_LOCK:
                     Integer afState = result.get(CaptureResult.CONTROL_AF_STATE);
-                     if(afState==null){
+                     if(afState==null||afState == CaptureResult.CONTROL_AF_STATE_INACTIVE){
                          captureStillPicture();
                      }else if(CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED==afState||CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED==afState){
                          Integer aeState = result.get(CaptureResult.CONTROL_AE_STATE);
@@ -223,26 +226,12 @@ public class Camera2Helper {
 
     private volatile static Camera2Helper singleton;
 
-    public Camera2Helper(Activity act, AutoFitTextureView view ) {
-
-    }
-    public Camera2Helper(Activity act, AutoFitTextureView view ,File file) {
+    public Camera2Helper(Activity act, AutoFitTextureView view) {
         mActivity =act;
         mTextureView = view;
-        mFile = file;
         mCameraManager = (CameraManager) mActivity.getSystemService(Context.CAMERA_SERVICE);
         mMediaSaver = new MediaSaver(mActivity);
     }
-
-    public static Camera2Helper getSingleton(Activity act,AutoFitTextureView view,File file){
-        if(singleton == null){
-            synchronized (Camera2Helper.class){
-                singleton = new Camera2Helper(act,view,file);
-            }
-        }
-        return singleton;
-    }
-
 
     public void startCameraPreView(){
             startBackgroundThread();
@@ -252,7 +241,7 @@ public class Camera2Helper {
                 public void run() {
                     if(mTextureView != null){
                         if(mTextureView.isAvailable()){
-                            openCamera(mTextureView.getWidth(),mTextureView.getHeight());
+                            openCamera(DEFAULT_CAMERA_ID);
                         }else{
                             mTextureView.setSurfaceTextureListener(mSurfaceTextureListener);
                         }
@@ -305,7 +294,7 @@ public class Camera2Helper {
                 public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
                     super.onCaptureCompleted(session, request, result);
                     unlockFocus();
-                    mListener.onAfterTackPicture();
+
                 }
             };
             mCameraCaptureSession.stopRepeating();
@@ -404,19 +393,17 @@ public class Camera2Helper {
         }
     }
 
-    private void setUpCameraOutputs(int width , int height){
+    private void setUpCameraOutputs(int id){
         try{
 
-            for(String cameraid:mCameraManager.getCameraIdList()){
-                CameraCharacteristics cameraCharacteristics = mCameraManager.getCameraCharacteristics(cameraid);
-                StreamConfigurationMap map = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-                if (map == null) {
-                    continue;
-                }
+            mCameraId = Integer.toString(id);
+            CameraCharacteristics cameraCharacteristics = mCameraManager.getCameraCharacteristics(mCameraId);
+            StreamConfigurationMap map = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
 
-                Size largest = Collections.max(Arrays.asList(map.getOutputSizes(ImageFormat.JPEG)),new Camera2Helper.CompareSizesByArea());
-                    mImageReader = ImageReader.newInstance(largest.getWidth(),largest.getHeight(),ImageFormat.JPEG,2);
-                    mImageReader.setOnImageAvailableListener(mOnImageAvailableListener,mBackgroundHandler);
+            Size largest =PictureSizeHelper.getPreviewSize(mActivity,Arrays.asList(map.getOutputSizes(ImageFormat.JPEG)));
+
+                mImageReader = ImageReader.newInstance(largest.getWidth(),largest.getHeight(),ImageFormat.JPEG,2);
+                mImageReader.setOnImageAvailableListener(mOnImageAvailableListener,mBackgroundHandler);
                 int displayRotation = mActivity.getWindowManager().getDefaultDisplay().getRotation();
                 mSensorOrientation =  cameraCharacteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
                 boolean swappedDimemsions = false;
@@ -435,27 +422,12 @@ public class Camera2Helper {
                         break;
                 }
 
-                Point displaySize = new Point();
-                mActivity.getWindowManager().getDefaultDisplay().getSize(displaySize);
-                int rotatedPreViewWidth = width;
-                int rotatedPreviewHeight =  height;
-                int maxPreViewWidht = displaySize.x;
-                int maxPreViewHeight = displaySize.y;
+            Size displaySize =PictureSizeHelper.getTextureSize(mActivity,largest);
                 if(swappedDimemsions){
-                    rotatedPreViewWidth = height;
-                    rotatedPreviewHeight =width;
-                    maxPreViewWidht = displaySize.y;
-                    maxPreViewHeight = displaySize.x;
+                    mPreviewSize =new Size(displaySize.getHeight(),displaySize.getWidth());
+                }else{
+                    mPreviewSize =new Size(displaySize.getHeight(),displaySize.getWidth());
                 }
-                if(maxPreViewWidht > MAX_PREVIEW_WIDTH){
-                    maxPreViewWidht = MAX_PREVIEW_WIDTH;
-                }
-                if(maxPreViewHeight > MAX_PREVIEW_HEIGHT){
-                    maxPreViewHeight = MAX_PREVIEW_HEIGHT;
-                }
-
-                mPreviewSize = chooseOptimalSize(map.getOutputSizes(SurfaceTexture.class),rotatedPreViewWidth,rotatedPreviewHeight,maxPreViewWidht,maxPreViewHeight,largest);
-
                 int orientation = mActivity.getResources().getConfiguration().orientation;
                     if(orientation == Configuration.ORIENTATION_LANDSCAPE){
                         mTextureView.setAspectRatio(mPreviewSize.getWidth(),mPreviewSize.getHeight());
@@ -465,10 +437,7 @@ public class Camera2Helper {
 
                     Boolean available = cameraCharacteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
                     mFlashSupported =  available == null ? false : available;
-                    mCameraId = cameraid;
-                    return;
 
-            }
 
         }catch (CameraAccessException e){
             e.printStackTrace();
@@ -476,41 +445,13 @@ public class Camera2Helper {
     }
 
 
-    private static Size chooseOptimalSize(Size[] choices, int textureViewWidth , int textureViewHeight, int maxWidth ,int maxHeight , Size aspectRatio){
-
-            List<Size> bigEnough =  new ArrayList<>();
-            List<Size> notBigEnough = new ArrayList<>();
-
-            int w = aspectRatio.getWidth();
-            int h = aspectRatio.getHeight();
-            for (Size option : choices){
-
-                if(option.getWidth() <= maxWidth && option.getHeight() <= maxHeight){
-                    if(option.getWidth() >= textureViewWidth && option.getHeight() >= textureViewHeight){
-                        bigEnough.add(option);
-                    }else{
-                        notBigEnough.add(option);
-                    }
-                }
-            }
-
-            if(bigEnough.size() > 0) {
-                return Collections.min(bigEnough, new Camera2Helper.CompareSizesByArea());
-            }else if (notBigEnough.size() > 0){
-                return Collections.max(notBigEnough,new Camera2Helper.CompareSizesByArea());
-            }else{
-                return choices[0];
-            }
-
-    }
-
-    private void openCamera(int width , int height){
+    private void openCamera( final int cameraId){
         if(ActivityCompat.checkSelfPermission(mActivity,Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED){
 
             return;
         }
-        setUpCameraOutputs(width,height);
-        configureTransform(width,height);
+        setUpCameraOutputs(cameraId);
+       // configureTransform();
 
         try {
             if(!mCameraOpenCloseLock.tryAcquire(2500,TimeUnit.MILLISECONDS)){
@@ -551,6 +492,17 @@ public class Camera2Helper {
         }
     }
 
+    public void switchCamera() {
+        int id = 0;
+        if(mCameraId.equals("0")) {
+            id = 1;
+        }else if(mCameraId.equals("1")){
+            id= 0;
+        }
+        closeCamera();
+        openCamera(id);
+    }
+
     private void configureTransform(int width, int height){
 
         if(mTextureView ==null || mPreviewSize == null){
@@ -585,87 +537,33 @@ public class Camera2Helper {
         closeCamera();
         mActivity = null;
         mTextureView = null;
-        mListener = null;
 
     }
 
 
- private    static class CompareSizesByArea implements Comparator<Size> {
 
-        @Override
-        public int compare(Size lhs, Size rhs) {
-            // We cast here to ensure the multiplications won't overflow
-            return Long.signum((long) lhs.getWidth() * lhs.getHeight() -
-                    (long) rhs.getWidth() * rhs.getHeight());
+    private final Object mImageReaderSync = new Object();
+    private byte[] getBuffer(Image image) {
+        synchronized (mImageReaderSync) {
+            byte[] imageBuffer = null;
+                Image.Plane plane = image.getPlanes()[0];
+                ByteBuffer buffer = plane.getBuffer();
+                imageBuffer = new byte[buffer.remaining()];
+                buffer.get(imageBuffer);
+                buffer.rewind();
+                image.close();
+            return imageBuffer;
         }
-
     }
 
-
-    public void saveImage(Image image){
-        ByteBuffer buffer = image.getPlanes()[0].getBuffer();
-        byte[] data = new byte[buffer.remaining()];
-        buffer.get(data);
+    public void saveImage(byte[] data){
         ContentValues contentValues =mMediaSaver.createContentValues(data, 0, 0);
-        mMediaSaver.addSaveRequest(data,contentValues,null,null);
+        mMediaSaver.addSaveRequest(data,contentValues,null,(MainActivity)mActivity);
 
     }
-     static class ImageSaver implements Runnable{
 
 
-        private final Image mImage;
-        private final File mFile;
 
-        public ImageSaver(Image image, File file){
-            mImage = image;
-            mFile = file;
-        }
-
-        @Override
-        public void run() {
-
-            ByteBuffer buffer = mImage.getPlanes()[0].getBuffer();
-            byte[] bytes = new byte[buffer.remaining()];
-            buffer.get(bytes);
-            FileOutputStream output = null;
-            try {
-                output = new FileOutputStream(mFile);
-                output.write(bytes);
-            } catch (IOException e) {
-                e.printStackTrace();
-            } finally {
-                mImage.close();
-                if (null != output) {
-                    try {
-                        output.close();
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                }
-            }
-
-        }
-    }
-
-    public interface AfterDoListener{
-        void onAfterPreviewBack();
-        void onAfterTackPicture();
-    }
-    public void setAfterDoListener (AfterDoListener listener){
-        mListener =listener;
-    }
-
-    private void showToast(final String text) {
-
-        if (mActivity != null) {
-            mActivity.runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    Toast.makeText(mActivity, text, Toast.LENGTH_SHORT).show();
-                }
-            });
-        }
-    }
 
 
 

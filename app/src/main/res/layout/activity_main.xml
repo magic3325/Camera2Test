@@ -12,25 +12,45 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content" />
 
-    <FrameLayout
+    <RelativeLayout
         android:id="@+id/control"
         android:layout_width="match_parent"
-        android:layout_height="112dp"
+        android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"
+        android:layout_marginLeft="15dp"
+        android:layout_marginRight="15dp"
+        android:layout_marginTop="15dp"
         android:layout_marginBottom="50dp"
         >
 
-        <Button
-            android:id="@+id/btn_take_photo"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:text="takePhoto"
 
+
+        <ImageView
+            android:id="@+id/shutter_button_photo"
+            android:background="@drawable/ic_btn_shutter_circle"
+            android:focusable="true"
+            android:clickable="true"
+            android:layout_width="70dp"
+            android:layout_height="70dp"
+            android:src="@drawable/btn_shutter_photo"
+            android:scaleType="fitXY"
+            android:layout_centerHorizontal="true"
+            android:layout_centerVertical="true"
+            />
+        <ImageView
+            android:id="@+id/switch_button"
+
+            android:focusable="true"
+            android:clickable="true"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@drawable/btn_switch_id"
+            android:scaleType="fitXY"
+            android:layout_alignParentRight="true"
+            android:layout_centerVertical="true"
             />
 
 
-
-    </FrameLayout>
+    </RelativeLayout>
 
 </RelativeLayout>
