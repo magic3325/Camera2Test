@@ -28,10 +28,13 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
+import android.util.Log;
 import android.util.Size;
 import android.util.SparseIntArray;
 import android.view.Surface;
 import android.view.TextureView;
+import android.view.View;
+
 import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -50,8 +53,7 @@ public class Camera2Helper {
     private  static final int STATE_WAITING_PRECAPTURE = 2;
     private  static final int STATE_WAITING_NON_PRECAPTURE = 3;
     private  static final int STATE_PICTURE_TAKEN = 4;
-    private  static final int MAX_PREVIEW_WIDTH = 1920;
-    private  static final int MAX_PREVIEW_HEIGHT = 1080;
+
 
 
     private static final int DEFAULT_CAMERA_ID = 1;
@@ -65,10 +67,8 @@ public class Camera2Helper {
     private HandlerThread mBackgroundThread;
     private Handler mBackgroundHandler;
     private ImageReader mImageReader;
-    private static File mFile =  null;
     private Semaphore mCameraOpenCloseLock  = new Semaphore(1);
     private boolean mFlashSupported;
-    private int mSensorOrientation;
     private CaptureRequest.Builder mPreviewRequestBuilder;
     private CaptureRequest mPreviewRequest;
     private int mState = STATE_PREVIEW;
@@ -76,12 +76,21 @@ public class Camera2Helper {
     private boolean isNeedHIdeProgressbar = true;
 
     private MediaSaver mMediaSaver;
+    private AnimationManager mAnimationManager;
 
     static{
         ORIENTATIONS.append(Surface.ROTATION_0,90);
         ORIENTATIONS.append(Surface.ROTATION_90,0);
         ORIENTATIONS.append(Surface.ROTATION_180,270);
         ORIENTATIONS.append(Surface.ROTATION_270,180);
+    }
+
+    public Camera2Helper(Activity act, AutoFitTextureView view) {
+        mActivity =act;
+        mTextureView = view;
+        mCameraManager = (CameraManager) mActivity.getSystemService(Context.CAMERA_SERVICE);
+        mMediaSaver = new MediaSaver(mActivity);
+        mAnimationManager = new AnimationManager(mActivity);
     }
 
     private final ImageReader.OnImageAvailableListener mOnImageAvailableListener =new ImageReader.OnImageAvailableListener(){
@@ -99,14 +108,13 @@ public class Camera2Helper {
         public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
             mTextureViewWidth = width;
             mTextureViewHeight = height;
-            openCamera(DEFAULT_CAMERA_ID);
+            openCamera(mCameraId!=null?Integer.valueOf(mCameraId):DEFAULT_CAMERA_ID);
         }
 
         @Override
         public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
-            //configureTransform(width,height);
-            mTextureViewWidth = width;
-            mTextureViewHeight = height;
+           // configureTransform(width,height);
+
         }
 
         @Override
@@ -125,7 +133,14 @@ public class Camera2Helper {
         public void onOpened(@NonNull CameraDevice camera) {
             mCameraOpenCloseLock.release();
             mCameraDevice =camera;
-            createCameraPreviewSession();
+            new Handler().postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    createCameraPreviewSession();
+                }
+            },100);
+            //createCameraPreviewSession();
+            Log.e("@water","onOpened");
         }
 
         @Override
@@ -149,15 +164,13 @@ public class Camera2Helper {
         private void process(CaptureResult result){
             switch (mState){
                 case STATE_PREVIEW:{
-                    if(isNeedHIdeProgressbar){
 
-                        isNeedHIdeProgressbar=false;
-                    }
                     break;
                 }
                 case STATE_WAITING_LOCK:
                     Integer afState = result.get(CaptureResult.CONTROL_AF_STATE);
                      if(afState==null||afState == CaptureResult.CONTROL_AF_STATE_INACTIVE){
+                         mState = STATE_PICTURE_TAKEN;
                          captureStillPicture();
                      }else if(CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED==afState||CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED==afState){
                          Integer aeState = result.get(CaptureResult.CONTROL_AE_STATE);
@@ -191,14 +204,12 @@ public class Camera2Helper {
         @Override
         public void onCaptureProgressed(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull CaptureResult partialResult) {
             super.onCaptureProgressed(session, request, partialResult);
-
             process(partialResult);
         }
 
         @Override
         public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
             super.onCaptureCompleted(session, request, result);
-
             process(result);
         }
 
@@ -224,14 +235,8 @@ public class Camera2Helper {
     };
 
 
-    private volatile static Camera2Helper singleton;
 
-    public Camera2Helper(Activity act, AutoFitTextureView view) {
-        mActivity =act;
-        mTextureView = view;
-        mCameraManager = (CameraManager) mActivity.getSystemService(Context.CAMERA_SERVICE);
-        mMediaSaver = new MediaSaver(mActivity);
-    }
+
 
     public void startCameraPreView(){
             startBackgroundThread();
@@ -241,7 +246,7 @@ public class Camera2Helper {
                 public void run() {
                     if(mTextureView != null){
                         if(mTextureView.isAvailable()){
-                            openCamera(DEFAULT_CAMERA_ID);
+                            openCamera(mCameraId!=null?Integer.valueOf(mCameraId):DEFAULT_CAMERA_ID);
                         }else{
                             mTextureView.setSurfaceTextureListener(mSurfaceTextureListener);
                         }
@@ -339,9 +344,7 @@ public class Camera2Helper {
         }
     }
 
-    private int getOrientation(int rotation){
-        return (ORIENTATIONS.get(rotation)+mSensorOrientation+270)%360;
-    }
+
 
     private void runPrecaptureSequence(){
         try {
@@ -359,7 +362,7 @@ public class Camera2Helper {
             assert texture!=null;
 
             texture.setDefaultBufferSize(mPreviewSize.getWidth(),mPreviewSize.getHeight());;
-
+            Log.e("@water " ,"mPreviewSize  = "+mPreviewSize);
             Surface surface = new Surface(texture);
             mPreviewRequestBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
             mPreviewRequestBuilder.addTarget(surface);
@@ -398,45 +401,16 @@ public class Camera2Helper {
 
             mCameraId = Integer.toString(id);
             CameraCharacteristics cameraCharacteristics = mCameraManager.getCameraCharacteristics(mCameraId);
-            StreamConfigurationMap map = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            Size largest =PictureSizeHelper.getImageSize(mActivity,id);
+            mImageReader = ImageReader.newInstance(largest.getWidth(),largest.getHeight(),ImageFormat.JPEG,2);
+            mImageReader.setOnImageAvailableListener(mOnImageAvailableListener,mBackgroundHandler);
 
-            Size largest =PictureSizeHelper.getPreviewSize(mActivity,Arrays.asList(map.getOutputSizes(ImageFormat.JPEG)));
+            mPreviewSize = PictureSizeHelper.getPreviewSize(mActivity,id,largest);
+            mTextureView.setAspectRatio(mPreviewSize.getHeight(),mPreviewSize.getWidth());
 
-                mImageReader = ImageReader.newInstance(largest.getWidth(),largest.getHeight(),ImageFormat.JPEG,2);
-                mImageReader.setOnImageAvailableListener(mOnImageAvailableListener,mBackgroundHandler);
-                int displayRotation = mActivity.getWindowManager().getDefaultDisplay().getRotation();
-                mSensorOrientation =  cameraCharacteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
-                boolean swappedDimemsions = false;
-                switch (displayRotation){
-                    case Surface.ROTATION_0:
-                    case Surface.ROTATION_180:
-                            if(mSensorOrientation == 90||mSensorOrientation==270){
-                                swappedDimemsions =true;
-                            }
-                          break;
-                    case Surface.ROTATION_90:
-                    case Surface.ROTATION_270:
-                        if (mSensorOrientation == 0 || mSensorOrientation == 180) {
-                            swappedDimemsions = true;
-                        }
-                        break;
-                }
-
-            Size displaySize =PictureSizeHelper.getTextureSize(mActivity,largest);
-                if(swappedDimemsions){
-                    mPreviewSize =new Size(displaySize.getHeight(),displaySize.getWidth());
-                }else{
-                    mPreviewSize =new Size(displaySize.getHeight(),displaySize.getWidth());
-                }
-                int orientation = mActivity.getResources().getConfiguration().orientation;
-                    if(orientation == Configuration.ORIENTATION_LANDSCAPE){
-                        mTextureView.setAspectRatio(mPreviewSize.getWidth(),mPreviewSize.getHeight());
-                    }else{
-                        mTextureView.setAspectRatio(mPreviewSize.getHeight(),mPreviewSize.getWidth());
-                    }
-
-                    Boolean available = cameraCharacteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
-                    mFlashSupported =  available == null ? false : available;
+            Log.e("@water","largest  =  "+largest+ "  mPreviewSize  =   "  +mPreviewSize);
+            Boolean available = cameraCharacteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+            mFlashSupported =  available == null ? false : available;
 
 
         }catch (CameraAccessException e){
@@ -451,7 +425,7 @@ public class Camera2Helper {
             return;
         }
         setUpCameraOutputs(cameraId);
-       // configureTransform();
+       // configureTransform(mTextureViewWidth,mTextureViewHeight);
 
         try {
             if(!mCameraOpenCloseLock.tryAcquire(2500,TimeUnit.MILLISECONDS)){
@@ -499,8 +473,17 @@ public class Camera2Helper {
         }else if(mCameraId.equals("1")){
             id= 0;
         }
+        mCameraId = Integer.toString(id);
+        mAnimationManager.animationStart(AnimationManager.AnimationType.TYPE_SWITCH_CAMERA,mTextureView.getBitmap(),id);
         closeCamera();
-        openCamera(id);
+        new Handler().postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                openCamera(Integer.valueOf(mCameraId));
+            }
+        },200);
+
+
     }
 
     private void configureTransform(int width, int height){
@@ -529,6 +512,7 @@ public class Camera2Helper {
         }
 
         mTextureView.setTransform(matrix);
+        mTextureView.setAspectRatio(width,height);
 
     }
 

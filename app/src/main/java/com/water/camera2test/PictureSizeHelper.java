@@ -2,13 +2,21 @@ package com.water.camera2test;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.res.Configuration;
+import android.graphics.ImageFormat;
 import android.graphics.Point;
+import android.hardware.camera2.CameraAccessException;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraManager;
+import android.hardware.camera2.params.StreamConfigurationMap;
 import android.util.DisplayMetrics;
 import android.util.Size;
 import android.view.Display;
+import android.view.Surface;
 import android.view.WindowManager;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -61,13 +69,7 @@ public class PictureSizeHelper {
     }
 
 
-    public static Size getFullScreenSize(Context context) {
-        WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
-        Display display = wm.getDefaultDisplay();
-        DisplayMetrics dm = new DisplayMetrics();
-        display.getRealMetrics(dm);
-        return new Size(dm.widthPixels,dm.heightPixels);
-    }
+
 
     public static double getStandardAspectRatio(Size size) {
         double ratio = (double) size.getWidth() / (double) size.getHeight();
@@ -99,47 +101,83 @@ public class PictureSizeHelper {
         return size;
     }
 
-    public static double getDefaultRatio() {
-        //return RATIO_4_3;
-        return RATIO_16_9;
-    }
 
-    public static  Size getPreviewSize(Activity activity, List<Size> sizes){
-        double previewRatio = getDefaultRatio();
-        WindowManager wm = (WindowManager) activity.getSystemService(Context.WINDOW_SERVICE);
-        Display display = wm.getDefaultDisplay();
-        Point point = new Point();
-        display.getRealSize(point);
-        int panelHeight = Math.min(point.x, point.y);
-        int panelWidth = (int) (previewRatio * panelHeight);
 
-        List<Size> sizeEqualRatio = new ArrayList<>();
-        for (Size size : sizes) {
-            if (Math.abs((double) size.getWidth() / size.getHeight() - previewRatio) < ASPECT_TOLERANCE) {
-                sizeEqualRatio.add(size);
-            }
-        }
+    public static  Size getImageSize(Activity activity, int cameraId){
+
         Size optimalSize = null;
-            optimalSize = Collections.max(sizeEqualRatio,new CompareSizesByArea());
-        if (optimalSize != null) {
-            return optimalSize;
-        }
-        double minDiffHeight = Double.MAX_VALUE;
-        if (optimalSize == null) {
-            previewRatio = Double.parseDouble(PICTURE_RATIO_4_3);
+        try {
+            CameraManager manager = (CameraManager) activity.getSystemService(Context.CAMERA_SERVICE);
+            CameraCharacteristics cameraCharacteristics = manager.getCameraCharacteristics(Integer.toString(cameraId));
+            StreamConfigurationMap map = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            List<Size> sizes =  Arrays.asList(map.getOutputSizes(ImageFormat.JPEG));
+            double previewRatio = CameraUtil.getRatio(cameraId);
+            List<Size> sizeEqualRatio = new ArrayList<>();
             for (Size size : sizes) {
-                double ratio = (double) size.getWidth() / size.getHeight();
-                if (Math.abs(ratio - previewRatio) > ASPECT_TOLERANCE) {
-                    continue;
-                }
-                if (Math.abs(size.getHeight() - panelHeight) < minDiffHeight) {
-                    optimalSize = size;
-                    minDiffHeight = Math.abs(size.getHeight() - panelHeight);
+                if (Math.abs((double) size.getWidth() / size.getHeight() - previewRatio) < ASPECT_TOLERANCE) {
+                    sizeEqualRatio.add(size);
                 }
             }
+                optimalSize = Collections.max(sizeEqualRatio,new CompareSizesByArea());
+            if (optimalSize != null) {
+                return optimalSize;
+            }
+            if (optimalSize == null) {
+                previewRatio = Double.parseDouble(PICTURE_RATIO_4_3);
+                for (Size size : sizes) {
+                    if (Math.abs((double) size.getWidth() / size.getHeight() - previewRatio) < ASPECT_TOLERANCE) {
+                        sizeEqualRatio.add(size);
+                    }
+                }
+                optimalSize = Collections.max(sizeEqualRatio,new CompareSizesByArea());
+            }
+
+        }catch (CameraAccessException e){
+            e.printStackTrace();
         }
         return optimalSize;
     }
+
+
+    public static  Size getPreviewSize(Activity activity,int cameraId, Size size){
+        CameraCharacteristics cameraCharacteristics = null;
+        Size preSize = null;
+        try {
+            CameraManager manager = (CameraManager) activity.getSystemService(Context.CAMERA_SERVICE);
+             cameraCharacteristics = manager.getCameraCharacteristics(Integer.toString(cameraId));
+        }catch (CameraAccessException e){
+            e.printStackTrace();
+        }
+
+        int displayRotation = activity.getWindowManager().getDefaultDisplay().getRotation();
+        int  sensorOrientation =  cameraCharacteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
+
+        boolean swappedDimemsions = false;
+        switch (displayRotation){
+            case Surface.ROTATION_0:
+            case Surface.ROTATION_180:
+                if(sensorOrientation == 90||sensorOrientation==270){
+                    swappedDimemsions =true;
+                }
+                break;
+            case Surface.ROTATION_90:
+            case Surface.ROTATION_270:
+                if (sensorOrientation == 0 || sensorOrientation == 180) {
+                    swappedDimemsions = true;
+                }
+                break;
+        }
+
+        Size displaySize =getTextureSize(activity,size);
+        if(swappedDimemsions){
+            preSize =new Size(displaySize.getHeight(),displaySize.getWidth());
+        }else{
+            preSize =new Size(displaySize.getHeight(),displaySize.getWidth());
+        }
+        return preSize;
+
+    }
+
 
     public static  Size getTextureSize(Activity activity, Size size){
         double previewRatio = (double) size.getWidth() / (double) size.getHeight();
